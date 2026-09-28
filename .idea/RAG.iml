@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="PYTHON_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <!--
+        backend 必须是 Sources Root：全部后端代码都用 `from app.xxx import ...`
+        的绝对导入，只有把 backend/ 加进源码路径，PyCharm 才能解析这些 import。
+        少了这一条，打开项目会看到满屏「未解析的引用」红波浪线。
+      -->
+      <sourceFolder url="file://$MODULE_DIR$/backend" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/backend/tests" isTestSource="true" />
+
+      <!-- 虚拟环境：几万个文件，不排除会让 PyCharm 索引到卡 -->
+      <excludeFolder url="file://$MODULE_DIR$/backend/.venv" />
+      <!-- 前端依赖与构建产物 -->
+      <excludeFolder url="file://$MODULE_DIR$/frontend/node_modules" />
+      <excludeFolder url="file://$MODULE_DIR$/frontend/dist" />
+      <excludeFolder url="file://$MODULE_DIR$/frontend/preview" />
+      <!-- 运行期数据：SQLite 库、上传的原始文档、向量库，体积大且随时在变 -->
+      <excludeFolder url="file://$MODULE_DIR$/data" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/.pytest_cache" />
+    </content>
+    <orderEntry type="jdk" jdkName="Python 3.12 (RAG)" jdkType="Python SDK" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+  <component name="PyDocumentationSettings">
+    <option name="format" value="PLAIN" />
+    <option name="myDocStringFormat" value="Plain" />
+  </component>
+</module>

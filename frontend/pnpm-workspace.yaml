@@ -1,0 +1,8 @@
+# pnpm 10+ 出于供应链安全默认拦截依赖的安装脚本。
+# esbuild 必须跑自己的安装脚本才能把平台二进制落位，不放行的话
+# vite 一启动就报 "You installed esbuild for another platform"。
+allowBuilds:
+  esbuild: true
+
+# 国内镜像，装依赖快一个数量级
+registry: https://registry.npmmirror.com

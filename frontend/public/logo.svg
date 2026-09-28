@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="本地 RAG 知识库问答系统">
+  <!--
+    网站图标（favicon）。与 src/components/Logo.tsx 保持一致 ——
+    改了一处记得同步另一处，scripts/check-logo-render.mjs 会校验两者同源。
+    这里必须独立成文件：浏览器要的是一个真实 URL，不能是 React 组件。
+  -->
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32">
+      <stop offset="0%" stop-color="#5b93f8"/>
+      <stop offset="100%" stop-color="#1f56c4"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="9" fill="url(#g)"/>
+  <circle cx="14" cy="13.6" r="6.2" fill="none" stroke="#fff" stroke-width="2.4"/>
+  <rect x="10.5" y="10.7" width="7" height="2" rx="1" fill="#fff"/>
+  <rect x="10.5" y="14.5" width="4.6" height="2" rx="1" fill="#fff" opacity="0.72"/>
+  <line x1="18.5" y1="18.2" x2="23.3" y2="23" stroke="#fff" stroke-width="2.7" stroke-linecap="round"/>
+</svg>

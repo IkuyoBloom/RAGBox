@@ -1,0 +1,16 @@
+# 默认忽略的文件
+/shelf/
+/workspace.xml
+# 基于编辑器的 HTTP 客户端请求
+/httpRequests/
+# 已忽略包含查询文件的默认文件夹
+/queries/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+
+# 部署配置：里面是使用者自己的服务器地址与账号，属于个人环境，不该入库
+/deployment.xml
+# setup_pycharm.py 改写 jdk.table.xml 时留下的备份
+# （注意它在 PyCharm 的全局配置目录里，这里只是防御性写法）
+*.bak

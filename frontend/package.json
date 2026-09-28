@@ -1,0 +1,35 @@
+{
+  "name": "local-rag-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "check:settings": "node scripts/check-settings-tree.mjs && node scripts/check-settings-render.mjs",
+    "check:settings:preview": "node scripts/check-settings-render.mjs --out preview/settings-panel.html",
+    "check:sidebar": "node scripts/check-kb-model-badge.mjs && node scripts/check-sidebar-render.mjs",
+    "check:sidebar:preview": "node scripts/check-sidebar-render.mjs --out preview/sidebar.html",
+    "check:filepick": "node scripts/check-file-pick.mjs",
+    "check:markdown": "node scripts/check-markdown.mjs && node scripts/check-markdown-render.mjs",
+    "check:markdown:preview": "node scripts/check-markdown-render.mjs --out preview/markdown.html",
+    "check:chat": "node scripts/check-chat-render.mjs",
+    "check:logo": "node scripts/check-logo-render.mjs",
+    "check:logo:preview": "node scripts/check-logo-render.mjs --out preview/logo.html",
+    "check:theme": "node scripts/check-theme.mjs",
+    "check:all": "pnpm check:settings && pnpm check:sidebar && pnpm check:filepick && pnpm check:markdown && pnpm check:chat && pnpm check:logo && pnpm check:theme"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.7"
+  }
+}

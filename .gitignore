@@ -1,0 +1,58 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# ---- 环境变量（含密钥，绝不入库）----
+.env
+.env.local
+
+# ---- 运行期数据 ----
+# 注意写法：必须用 `data/*` 再反向排除，写成 `data/` 的话
+# 整个目录被忽略，`!data/.gitkeep` 是救不回来的（git 不会进入被忽略的目录）。
+data/*
+!data/.gitkeep
+*.db
+*.sqlite3
+
+# ---- 前端 ----
+node_modules/
+frontend/dist/
+frontend/.vite/
+# SSR 导出的布局预览是随时可再生成的产物，不入库
+frontend/preview/
+# TypeScript 增量编译缓存：每次构建都会变，入库只会制造无意义的 diff
+*.tsbuildinfo
+*.local
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+Thumbs.db
+desktop.ini
+
+# PyCharm / IntelliJ
+# 刻意**不**忽略整个 .idea/：misc.xml（解释器）、RAG.iml（源码根）、
+# runConfigurations/（运行配置）属于项目配置，入库后 clone 下来打开就对。
+# 用户级文件由 .idea/.gitignore 负责排除（workspace.xml、shelf 等）。
+.idea/*.bak
+
+# ---- 临时脚本 ----
+scripts/_*.ps1
+
+# ---- AI 编码助手的项目约定文件 ----
+# AGENTS.md 是写给本地编码助手看的（启动方式、本机踩过的坑、排查纪律等），
+# 属于开发者的本地工作文件，不进公开仓库。
+# 同类文件一并忽略，免得以后再被卷进去。
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.cursorrules
+.windsurfrules
+.github/copilot-instructions.md
+
+# ---- UI 截图与临时产物 ----
+# 调整界面时用 headless 浏览器截图做前后对照，属于过程产物，不入库
+.tmp/
