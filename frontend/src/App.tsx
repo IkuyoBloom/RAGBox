@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from './api'
 import ChatPanel from './components/ChatPanel'
 import ChunkModal from './components/ChunkModal'
+import DocumentPanel from './components/DocumentPanel'
 import SettingsPanel from './components/SettingsPanel'
 import Sidebar from './components/Sidebar'
-import TopBar from './components/TopBar'
 import type { EmbedInfo } from './embedModel'
 import type {
   ChatEvent,
@@ -17,7 +17,7 @@ import type {
   SettingsOut,
 } from './types'
 
-/** 界面上的一条消息。比后端模型多了「正在流式输出」这类瞬态字段。 */
+/** 界面上的一条消息。 */
 export interface UIMessage {
   id: string
   role: 'user' | 'assistant'
@@ -40,19 +40,10 @@ export interface Toast {
   text: string
 }
 
-/** 界面主题。深色只切换 <html data-theme>，具体配色全在 CSS 变量里。 */
 type Theme = 'light' | 'dark'
 
 const THEME_STORAGE_KEY = 'rag-theme'
 
-/**
- * URL 上强制指定的主题（`?theme=dark` 或 `#theme=dark`）。
- *
- * 这个入口主要是为了**可验证**：无头浏览器截图时没法预置 localStorage，
- * 而应用的默认主题跟随系统偏好，无头模式又总报浅色 ——
- * 没有这个入口就没法用截图确认深色模式到底长什么样。
- * 顺带也方便把「某个主题下的样子」作为链接分享出去。
- */
 function readForcedTheme(): Theme | null {
   if (typeof window === 'undefined') return null
   const fromSearch = new URLSearchParams(window.location.search).get('theme')
@@ -63,13 +54,6 @@ function readForcedTheme(): Theme | null {
 
 const FORCED_THEME = readForcedTheme()
 
-/**
- * 决定初始主题。
- *
- * 优先级：URL 强制 > 用户显式选过 > 系统偏好 > 浅色。
- * 跟随系统是重要的默认值 —— 用户在系统里开了深色模式，
- * 打开应用却是一片白，那是最刺眼的一种不体贴。
- */
 function readInitialTheme(): Theme {
   if (FORCED_THEME) return FORCED_THEME
   if (typeof window === 'undefined') return 'light'
@@ -77,7 +61,7 @@ function readInitialTheme(): Theme {
     const saved = window.localStorage.getItem(THEME_STORAGE_KEY)
     if (saved === 'light' || saved === 'dark') return saved
   } catch {
-    // 隐私模式下 localStorage 可能抛异常，忽略即可
+    // 忽略隐私模式异常
   }
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
@@ -89,6 +73,7 @@ export default function App() {
   const [selectedKbId, setSelectedKbId] = useState<string | null>(null)
   const [settings, setSettings] = useState<SettingsOut | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [docsOpen, setDocsOpen] = useState(true)
   const [theme, setTheme] = useState<Theme>(readInitialTheme)
 
   const [provider, setProvider] = useState<string>('')
@@ -107,7 +92,6 @@ export default function App() {
     window.setTimeout(() => setToast(null), kind === 'err' ? 8000 : 3500)
   }, [])
 
-  // ---------------- 初始加载 ----------------
   const refreshHealth = useCallback(async () => {
     try {
       setHealth(await api.getHealth())
@@ -128,8 +112,6 @@ export default function App() {
     try {
       const s = await api.getSettings()
       setSettings(s)
-      // 首次拿到设置时，把配置里的当前通道同步到界面选择器；
-      // 之后不再覆盖，否则用户手动切换会被刷新冲掉。
       const active = s.items.find((i) => i.key === 'llm_provider')?.value
       setProvider((prev) => prev || (typeof active === 'string' && active ? active : 'ollama'))
     } catch (e) {
@@ -143,35 +125,22 @@ export default function App() {
     void refreshSettings()
   }, [refreshHealth, refreshKbs, refreshSettings])
 
-  // 主题落到 <html data-theme> 上：CSS 里所有深色规则都挂在这个属性下，
-  // 组件内部一条深色判断都不用写。同时记住用户的选择。
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    // URL 强制指定的主题不写回本地 —— 那只是一次性的覆盖，
-    // 不该污染用户自己的偏好设置
     if (FORCED_THEME) return
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, theme)
     } catch {
-      // 存不了就存不了，不影响使用
+      // 忽略
     }
   }, [theme])
 
-  // 自动选中知识库。
-  //
-  // 不这么做的话，打开页面看到的是「请先在左侧选择或创建一个知识库」，
-  // 而左侧明明就摆着一个库 —— 用户得先点一下才能提问，纯属多余的一步，
-  // 而且空状态里连示例问题都不显示（它们只在选中库之后才渲染）。
-  //
-  // 第二个条件同样重要：当前选中的库被删掉时要兜回来，
-  // 否则界面会停在一个已经不存在的库上，提问必然报错。
   useEffect(() => {
     if (kbs.length === 0) return
     if (selectedKbId && kbs.some((k) => k.id === selectedKbId)) return
     setSelectedKbId(kbs[0].id)
   }, [kbs, selectedKbId])
 
-  // ---------------- 选中知识库 -> 拉详情 ----------------
   const refreshKbDetail = useCallback(
     async (kbId: string) => {
       try {
@@ -191,7 +160,6 @@ export default function App() {
     void refreshKbDetail(selectedKbId)
   }, [selectedKbId, refreshKbDetail])
 
-  // 有文档还在索引时轮询，索引完成自动停 —— 比让用户手动刷新体验好得多
   const pendingCount = useMemo(
     () =>
       kbDetail?.documents.filter((d) =>
@@ -200,17 +168,6 @@ export default function App() {
     [kbDetail],
   )
 
-  /**
-   * 轮询节奏分成几档，而不是固定 2 秒。
-   *
-   * 一次导入 118 份文档要跑好几分钟，固定 2 秒意味着上百次轮询，
-   * 而每次轮询要拉**全部**文档（200+ 份、含完整 meta）。这个量足以
-   * 把后端连接池占满 —— 实测就是这样卡死的。用户其实只需要一个进度感，
-   * 待处理越多越可以慢一点。
-   *
-   * 用「档位」而不是直接用数量：档位只在跨过阈值时才变，
-   * 否则每完成一份文档就会重置计时器，节奏反而乱掉。
-   */
   const pollBucket = pendingCount === 0 ? 0 : pendingCount > 50 ? 3 : pendingCount > 10 ? 2 : 1
   const pollInterval = pollBucket === 3 ? 8000 : pollBucket === 2 ? 4000 : 2000
 
@@ -220,14 +177,11 @@ export default function App() {
     let cancelled = false
     let timer: number | undefined
 
-    // 关键：用「跑完再等」代替 setInterval。
-    // setInterval 不看上一次是否完成，请求一慢就会重叠堆积 ——
-    // 后端连接池正是被这些堆积的请求打满的（QueuePool limit reached）。
     const tick = async () => {
       try {
         await Promise.all([refreshKbDetail(selectedKbId), refreshKbs()])
       } catch {
-        // 单次轮询失败不该中断循环：后端可能在忙，下一轮会自己恢复
+        // 单次轮询失败不中断循环
       }
       if (!cancelled) timer = window.setTimeout(() => void tick(), pollInterval)
     }
@@ -239,7 +193,6 @@ export default function App() {
     }
   }, [selectedKbId, pollBucket, pollInterval, refreshKbDetail, refreshKbs])
 
-  // ---------------- 发送提问 ----------------
   const send = useCallback(
     async (text: string) => {
       const question = text.trim()
@@ -358,12 +311,6 @@ export default function App() {
     return items?.choices ?? ['ollama', 'openai']
   }, [settings])
 
-  /**
-   * 向量模型现状，供侧边栏显示「当前设置用什么模型」与「每个库实际用什么模型」。
-   *
-   * `loaded` 用来区分「Ollama 里确实没装这个模型」和「压根没连上 Ollama」——
-   * 少了这个标志，Ollama 一停，每个知识库都会被误标成「模型未安装」。
-   */
   const embedInfo = useMemo<EmbedInfo>(() => {
     const item = settings?.items.find((i) => i.key === 'ollama_embed_model')
     return {
@@ -375,48 +322,58 @@ export default function App() {
 
   return (
     <div className="app">
-      <TopBar
-        health={health}
-        provider={provider}
-        providerOptions={providerOptions}
-        onProviderChange={setProvider}
-        mode={mode}
-        onModeChange={setMode}
-        theme={theme}
-        onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-        onOpenSettings={() => setShowSettings(true)}
-        onRefresh={() => {
-          void refreshHealth()
-          void refreshKbs()
-          if (selectedKbId) void refreshKbDetail(selectedKbId)
-        }}
-        onNewConversation={newConversation}
-        hasConversation={messages.length > 0}
-      />
-
-      <div className="app-body">
+      <div className={`app-workspace ${docsOpen && selectedKbId ? 'with-docs' : ''}`}>
         <Sidebar
           kbs={kbs}
           selectedKbId={selectedKbId}
-          kbDetail={kbDetail}
           embedInfo={embedInfo}
+          health={health}
+          provider={provider}
+          theme={theme}
           onSelect={(id) => {
             setSelectedKbId(id)
             newConversation()
           }}
           onRefreshKbs={refreshKbs}
-          onRefreshDetail={() => selectedKbId && refreshKbDetail(selectedKbId)}
+          onRefreshAll={() => {
+            void refreshHealth()
+            void refreshKbs()
+            if (selectedKbId) void refreshKbDetail(selectedKbId)
+          }}
+          onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+          onOpenSettings={() => setShowSettings(true)}
           notify={notify}
         />
 
         <ChatPanel
           kbName={kbDetail?.name ?? null}
+          docCount={kbDetail?.documents.length ?? 0}
+          chunkCount={kbDetail?.chunk_count ?? 0}
           messages={messages}
           streaming={streaming}
+          provider={provider}
+          providerOptions={providerOptions}
+          onProviderChange={setProvider}
+          mode={mode}
+          onModeChange={setMode}
+          docsOpen={docsOpen}
+          onToggleDocs={() => setDocsOpen((v) => !v)}
+          onNewConversation={newConversation}
           onSend={send}
           onStop={stop}
           onOpenChunk={setOpenChunkId}
         />
+
+        {docsOpen && selectedKbId && (
+          <DocumentPanel
+            kbDetail={kbDetail}
+            selectedKbId={selectedKbId}
+            onRefreshKbs={refreshKbs}
+            onRefreshDetail={() => selectedKbId && refreshKbDetail(selectedKbId)}
+            notify={notify}
+            onClose={() => setDocsOpen(false)}
+          />
+        )}
       </div>
 
       {showSettings && settings && (
@@ -425,7 +382,9 @@ export default function App() {
           onClose={() => setShowSettings(false)}
           onSaved={(s) => {
             setSettings(s)
-            notify('ok', '设置已保存（立即生效，无需重启）')
+            const active = s.items.find((i) => i.key === 'llm_provider')?.value
+            if (typeof active === 'string' && active) setProvider(active)
+            notify('ok', '设置已保存（立即生效）')
           }}
           notify={notify}
         />

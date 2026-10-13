@@ -1,37 +1,46 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { UIMessage } from '../App'
+import type { SearchMode } from '../types'
 import AssistantAvatar from './AssistantAvatar'
 import CitationList from './CitationList'
-import Logo from './Logo'
 import Markdown, { type RenderCitation } from './Markdown'
 
 interface Props {
   kbName: string | null
+  docCount: number
+  chunkCount: number
   messages: UIMessage[]
   streaming: boolean
+  provider: string
+  providerOptions: string[]
+  onProviderChange: (v: string) => void
+  mode: SearchMode
+  onModeChange: (v: SearchMode) => void
+  docsOpen: boolean
+  onToggleDocs: () => void
+  onNewConversation: () => void
   onSend: (text: string) => void
   onStop: () => void
   onOpenChunk: (chunkId: string) => void
 }
 
-// 示例问题刻意写得**与语料无关**。
-// 原先那三条（「核心贡献」「实验数据集」「方法局限性」）是照着论文写的，
-// 换成剧情文本、说明文档、聊天记录就全都问不通 —— 而示例问题的意义
-// 恰恰是让用户一眼看懂「这个系统能拿我的资料做什么」。
 const SUGGESTIONS = [
   '这些资料主要讲了什么？',
   '帮我梳理一下其中的关键信息',
   '有哪些值得注意的细节？',
 ]
 
-/**
- * 构造引用角标的渲染函数，交给 Markdown 组件回调。
- *
- * 为什么做成回调而不是「渲染完再去替换」：回答的 Markdown 结构里，
- * `[n]` 可能出现在加粗里、列表项里、表格单元格里。等 HTML 出来再去做
- * 字符串替换，既要处理标签边界又容易破坏结构。在行内解析那一层
- * 顺带把引用识别出来，是最稳的做法。
- */
+const PROVIDER_LABELS: Record<string, string> = {
+  ollama: '本地 Ollama',
+  openai: '云端 API',
+}
+
+const MODE_LABELS: Record<SearchMode, string> = {
+  hybrid: '混合检索',
+  dense_only: '仅向量',
+  sparse_only: '仅 BM25',
+}
+
 function makeCitationRenderer(
   citations: UIMessage['citations'],
   onOpenChunk: (id: string) => void,
@@ -41,7 +50,6 @@ function makeCitationRenderer(
   return (index, key) => {
     const citation = byIndex.get(index)
     if (!citation) {
-      // 模型写了一个不存在的编号 —— 直接标红，这是「编造来源」的可见信号
       return (
         <span
           key={key}
@@ -71,7 +79,6 @@ export default function ChatPanel(props: Props) {
   const listRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
-  // 用户往上翻看历史时不要强行拽回底部 —— 流式输出时这一步很影响体验
   useEffect(() => {
     const el = listRef.current
     if (!el || !stickToBottom.current) return
@@ -94,41 +101,64 @@ export default function ChatPanel(props: Props) {
 
   const empty = messages.length === 0
   const placeholder = useMemo(() => {
-    if (!props.kbName) return '请先在左侧选择或创建一个知识库'
-    return `向「${props.kbName}」提问，Enter 发送，Shift+Enter 换行`
+    if (!props.kbName) return '请先在左侧选择或创建一个知识库…'
+    return `向「${props.kbName}」提问…`
   }, [props.kbName])
 
   return (
     <main className="chat">
+      {/* 工作区顶栏：当前知识库上下文 + 新对话 + 右侧文档栏开关 */}
+      <header className="chat-header">
+        <div className="chat-header-left">
+          <h1 className="chat-kb-title">{props.kbName ?? '未选择知识库'}</h1>
+          {props.kbName && (
+            <span className="chat-kb-meta">
+              {props.docCount} 份文档 · {props.chunkCount} 个切片
+            </span>
+          )}
+        </div>
+
+        <div className="chat-header-right">
+          {messages.length > 0 && (
+            <button className="btn ghost tiny" onClick={props.onNewConversation}>
+              新对话
+            </button>
+          )}
+          {props.kbName && (
+            <button
+              className={`btn tiny ${props.docsOpen ? 'active-toggle' : 'ghost'}`}
+              onClick={props.onToggleDocs}
+              title={props.docsOpen ? '收起右侧文档栏' : '展开右侧文档栏'}
+            >
+              文档目录 ({props.docCount})
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* 消息滚动区 */}
       <div className="chat-scroll" ref={listRef} onScroll={onScroll}>
         {empty ? (
           <div className="chat-empty">
-            {/* 品牌标记：空状态原本只有两行字，四周是巨大空白，看着像没加载出来 */}
-            <Logo size={58} className="empty-mark" />
             <div className="empty-title">
-              {props.kbName ? `开始向「${props.kbName}」提问` : '欢迎使用本地 RAG 知识库问答系统'}
+              {props.kbName ? `有什么关于「${props.kbName}」的问题？` : '选择或新建一个知识库'}
             </div>
             <p className="empty-desc">
-              系统会先在你的文档里做混合检索（BM25 + 向量 + RRF 融合），
-              再让大模型<b>仅依据检索到的片段</b>作答，并标注 [n] 来源。
+              {props.kbName
+                ? '所有回答均基于右侧库内文档检索生成，并附带原文引用角标。'
+                : '在左侧创建知识库并在右侧上传文档，索引完成后即可开始提问。'}
             </p>
-            {props.kbName ? (
-              <div className="suggestions-wrap">
-                <div className="suggestions-label">试试这样问</div>
-                <div className="suggestions">
-                  {SUGGESTIONS.map((s) => (
-                    <button key={s} className="suggestion" onClick={() => props.onSend(s)}>
-                      <span className="suggestion-text">{s}</span>
-                      <span className="suggestion-arrow" aria-hidden="true">
-                        →
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="empty-hint">
-                先在左侧新建知识库、上传文档并等索引完成，就可以开始提问了。
+
+            {props.kbName && (
+              <div className="suggestions">
+                {SUGGESTIONS.map((s) => (
+                  <button key={s} className="suggestion" onClick={() => props.onSend(s)}>
+                    <span className="suggestion-text">{s}</span>
+                    <span className="suggestion-arrow" aria-hidden="true">
+                      →
+                    </span>
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -136,15 +166,11 @@ export default function ChatPanel(props: Props) {
           <div className="message-list">
             {messages.map((m) => (
               <div key={m.id} className={`message message-${m.role}`}>
-                {m.role === 'user' ? (
-                  <div className="avatar">我</div>
-                ) : (
-                  <AssistantAvatar size={30} className="avatar-ai" />
-                )}
+                {m.role === 'assistant' && <AssistantAvatar className="avatar-ai" />}
                 <div className="bubble-wrap">
                   {m.role === 'assistant' && m.rewritten && (
-                    <div className="rewrite-note" title="系统自动把追问改写成了可以独立检索的问题">
-                      查询改写：<code>{m.rewritten}</code>
+                    <div className="rewrite-note" title="系统自动把追问改写成了可独立检索的问题">
+                      检索词改写：<code>{m.rewritten}</code>
                     </div>
                   )}
 
@@ -156,13 +182,12 @@ export default function ChatPanel(props: Props) {
                           renderCitation={makeCitationRenderer(m.citations, props.onOpenChunk)}
                         />
                       ) : (
-                        // 用户自己输入的按纯文本显示：没人希望自己打的字被当成 Markdown 解释
                         <div className="answer-text user-text">{m.content}</div>
                       )
                     ) : m.streaming ? (
                       <div className="thinking">
                         <span className="spinner" />
-                        正在检索并生成…
+                        正在检索文档并生成回答…
                       </div>
                     ) : null}
                   </div>
@@ -176,9 +201,9 @@ export default function ChatPanel(props: Props) {
                   {m.role === 'assistant' && m.trace && (
                     <div className="trace">
                       <span>检索 {m.trace.elapsed_ms} ms</span>
-                      <span>向量 {m.trace.dense_hits} 条</span>
-                      <span>BM25 {m.trace.sparse_hits} 条</span>
-                      <span>融合 {m.trace.fused_hits} 条</span>
+                      <span>向量 {m.trace.dense_hits}</span>
+                      <span>BM25 {m.trace.sparse_hits}</span>
+                      <span>融合 {m.trace.fused_hits}</span>
                       {m.latency_ms != null && <span>生成 {(m.latency_ms / 1000).toFixed(1)} s</span>}
                       {m.provider && (
                         <span>
@@ -196,14 +221,14 @@ export default function ChatPanel(props: Props) {
         )}
       </div>
 
+      {/* 一体化输入卡片：输入框与底部工具栏合一，减少割裂线条 */}
       <div className="composer">
-        {/* 内容列与消息列同宽：输入框铺满整个窗口宽度、消息却只有 920px
-            的话，两者对不齐，看着像两个不相干的区域 */}
-        <div className="composer-row">
+        <div className="composer-card">
           <textarea
             value={draft}
             placeholder={placeholder}
             disabled={!props.kbName}
+            rows={2}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -212,34 +237,54 @@ export default function ChatPanel(props: Props) {
               }
             }}
           />
-          <div className="composer-actions">
-            {streaming ? (
-              <button className="btn danger" onClick={props.onStop}>
-                停止生成
-              </button>
-            ) : (
-              <button
-                className="btn primary"
-                disabled={!draft.trim() || !props.kbName}
-                onClick={submit}
-              >
-                发送
-              </button>
-            )}
+          <div className="composer-toolbar">
+            <div className="composer-Selectors">
+              <label className="composer-pill-select" title="切换生成通道">
+                <select
+                  value={props.provider}
+                  onChange={(e) => props.onProviderChange(e.target.value)}
+                >
+                  {props.providerOptions.map((p) => (
+                    <option key={p} value={p}>
+                      {PROVIDER_LABELS[p] ?? p}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="composer-pill-select" title="切换检索模式">
+                <select
+                  value={props.mode}
+                  onChange={(e) => props.onModeChange(e.target.value as SearchMode)}
+                >
+                  {(Object.keys(MODE_LABELS) as SearchMode[]).map((m) => (
+                    <option key={m} value={m}>
+                      {MODE_LABELS[m]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="composer-right">
+              <span className="composer-shortcut">
+                <kbd>Enter</kbd> 发送 · <kbd>Shift+Enter</kbd> 换行
+              </span>
+              {streaming ? (
+                <button className="btn danger tiny" onClick={props.onStop}>
+                  停止
+                </button>
+              ) : (
+                <button
+                  className="btn primary tiny"
+                  disabled={!draft.trim() || !props.kbName}
+                  onClick={submit}
+                >
+                  发送
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-        {/* 快捷键原先没有任何提示，只能靠猜 —— 写出来 */}
-        <div className="composer-hint">
-          <span>
-            {props.kbName ? (
-              <>
-                <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行
-              </>
-            ) : (
-              '先在左侧选择或创建知识库'
-            )}
-          </span>
-          {props.kbName && <span className="composer-hint-kb">{props.kbName}</span>}
         </div>
       </div>
     </main>

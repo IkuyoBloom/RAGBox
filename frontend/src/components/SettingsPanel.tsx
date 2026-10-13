@@ -19,46 +19,39 @@ interface Props {
   notify: (kind: Toast['kind'], text: string) => void
 }
 
-const READONLY_GROUP = '只读环境信息'
-const READONLY_HINT = '由 .env 与运行环境决定，界面不可修改'
+const READONLY_GROUP = '环境信息'
+const READONLY_HINT = '由 .env 与运行环境决定，界面只读'
 
 export default function SettingsPanel({ settings, onClose, onSaved, notify }: Props) {
   const [draft, setDraft] = useState<Record<string, unknown>>({})
   const [saving, setSaving] = useState(false)
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ [READONLY_GROUP]: true })
 
-  // 用 effect 而不是 useState 初始化：保存/还原之后 settings 会换新对象，
-  // 草稿必须跟着重置。只在「外部刷新」时才需要担心覆盖用户编辑，
-  // 而本项目的设置只会在保存与还原这两个动作后重新拉取。
+  const tree = useMemo<GroupNode[]>(() => buildTree(settings), [settings])
+  const [activeTab, setActiveTab] = useState<string>(() => tree[0]?.name ?? READONLY_GROUP)
+
   useEffect(() => {
     setDraft(draftFrom(settings.items))
   }, [settings])
 
-  const tree = useMemo<GroupNode[]>(() => buildTree(settings), [settings])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   const byKey = useMemo(
     () => new Map(settings.items.map((i) => [i.key, i])),
     [settings.items],
   )
 
-  /** 只包含真正需要提交的改动。密钥留空表示「不修改」，不参与提交。 */
   const changed = useMemo(
     () => computeChanged(settings.items, draft),
     [draft, settings.items],
   )
 
   const changedCount = Object.keys(changed).length
-  const overriddenCount = settings.items.filter((i) => i.overridden).length
-  const allCollapsed =
-    tree.every((g) => collapsed[g.name]) && collapsed[READONLY_GROUP] === true
-
-  const toggleGroup = (name: string) =>
-    setCollapsed((c) => ({ ...c, [name]: !c[name] }))
-
-  const toggleAll = () => {
-    const next: Record<string, boolean> = { [READONLY_GROUP]: true }
-    for (const g of tree) next[g.name] = !allCollapsed
-    setCollapsed(next)
-  }
 
   const save = async () => {
     if (!changedCount) {
@@ -88,7 +81,6 @@ export default function SettingsPanel({ settings, onClose, onSaved, notify }: Pr
     }
   }
 
-  // ------------------------------------------------------------------
   const renderControl = (item: SettingItem) => {
     const value = draft[item.key]
 
@@ -101,14 +93,11 @@ export default function SettingsPanel({ settings, onClose, onSaved, notify }: Pr
             onChange={(e) => setDraft((d) => ({ ...d, [item.key]: e.target.checked }))}
           />
           <span className="switch-track" />
-          <span className="switch-text">{value ? '已开启' : '已关闭'}</span>
+          <span className="switch-text">{value ? '开启' : '关闭'}</span>
         </label>
       )
     }
 
-    // 动态来源（如 Ollama 已装模型列表）用 ModelPicker 而不是原生 datalist。
-    // datalist 会按输入框当前值过滤候选 —— 填着 bge-m3 时点开只看得到 bge-m3，
-    // 另一个候选仿佛不存在。详见该组件内的说明。
     if (item.choices_source) {
       return (
         <ModelPicker
@@ -168,8 +157,6 @@ export default function SettingsPanel({ settings, onClose, onSaved, notify }: Pr
     const active = isActive(item, draft)
     const hint = active ? null : dependencyHint(item, byKey)
     const isChanged = changed[item.key] !== undefined
-    // 建议列表为空通常意味着 Ollama 没启动 —— 明确告诉用户「可以手填」，
-    // 否则一个空的下拉/无提示的输入框会让人以为功能坏了。
     const noSuggestions = Boolean(item.choices_source) && !item.choices?.length
 
     return (
@@ -177,16 +164,14 @@ export default function SettingsPanel({ settings, onClose, onSaved, notify }: Pr
         <div className="field-label">
           <span className="field-name">
             {item.label}
-            {isChanged && <span className="tag-dirty">未保存</span>}
-            {!isChanged && item.overridden && <span className="tag-override">已覆盖默认</span>}
+            {isChanged && <span className="tag-dirty">待保存</span>}
+            {!isChanged && item.overridden && <span className="tag-override">已修改</span>}
             {item.scope && <span className="tag-scope">{item.scope}</span>}
           </span>
           {item.description && <span className="field-desc">{item.description}</span>}
-          {hint && <span className="field-hint">⚠ {hint}</span>}
+          {hint && <span className="field-hint">{hint}</span>}
           {noSuggestions && (
-            <span className="field-note">
-              未获取到候选列表（Ollama 未启动？），可直接手动输入模型名
-            </span>
+            <span className="field-note">未获取到候选列表，可直接手动输入模型名</span>
           )}
         </div>
         <div className="field-input">{renderControl(item)}</div>
@@ -194,125 +179,112 @@ export default function SettingsPanel({ settings, onClose, onSaved, notify }: Pr
     )
   }
 
+  const activeGroup = tree.find((g) => g.name === activeTab)
+
   return (
     <div className="modal-mask" onClick={onClose}>
-      <div className="drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div>
-            <div className="modal-title">系统设置</div>
-            <div className="modal-sub">
-              修改后立即生效，写入数据库覆盖层，可一键还原为 .env 默认值
-            </div>
-          </div>
-          <button className="icon-btn" onClick={onClose} title="关闭">
-            ×
-          </button>
-        </div>
+      <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+        {/* 左侧分类导航 */}
+        <nav className="settings-nav">
+          <div className="settings-nav-title">系统设置</div>
 
-        {/* 概览条：进面板第一眼就该知道「有多少项、我改了几项」 */}
-        <div className="settings-overview">
-          <span>
-            共 <b>{settings.items.length}</b> 项可调
-          </span>
-          <span className={changedCount ? 'ov-dirty' : ''}>
-            本次改动 <b>{changedCount}</b> 项
-          </span>
-          <span className={overriddenCount ? 'ov-override' : ''}>
-            已覆盖默认 <b>{overriddenCount}</b> 项
-          </span>
-          <button className="link-btn ov-toggle" onClick={toggleAll}>
-            {allCollapsed ? '展开全部' : '收起全部'}
-          </button>
-        </div>
-
-        <div className="drawer-body">
-          {tree.map((group, gi) => {
-            const isCollapsed = Boolean(collapsed[group.name])
-            const groupChanged = group.master
-              .concat(group.sections.flatMap((s) => s.items))
-              .filter((i) => changed[i.key] !== undefined).length
-
-            return (
-              <section className="settings-group" key={group.name}>
-                <button className="group-head" onClick={() => toggleGroup(group.name)}>
-                  <span className={`group-index ${groupChanged ? 'dirty' : ''}`}>{gi + 1}</span>
-                  <span className="group-title">
-                    <span className="group-name">{group.name}</span>
-                    {group.summary && <span className="group-summary">{group.summary}</span>}
-                  </span>
-                  {groupChanged > 0 && <span className="badge-dirty">{groupChanged} 项待保存</span>}
-                  <span className="group-count">{group.total} 项</span>
-                  <span className="chev">{isCollapsed ? '▸' : '▾'}</span>
+          <div className="settings-nav-list">
+            {tree.map((group) => {
+              const groupChanged = group.master
+                .concat(group.sections.flatMap((s) => s.items))
+                .filter((i) => changed[i.key] !== undefined).length
+              const isCurrent = activeTab === group.name
+              return (
+                <button
+                  key={group.name}
+                  className={`settings-nav-item ${isCurrent ? 'active' : ''}`}
+                  onClick={() => setActiveTab(group.name)}
+                >
+                  <span>{group.name}</span>
+                  {groupChanged > 0 && <span className="nav-dirty-dot" title={`${groupChanged} 项待保存`} />}
                 </button>
+              )
+            })}
 
-                {!isCollapsed && (
-                  <div className="group-body">
-                    {/* 主控项：本组的「总开关」，其余字段的生效与否由它决定 */}
-                    {group.master.map((item) => {
-                      const hint = dependencyHint(item, byKey)
-                      return (
-                        <div className="master-card" key={item.key}>
-                          <div className="master-label">
-                            <span className="field-name">
-                              {item.label}
-                              {changed[item.key] !== undefined && (
-                                <span className="tag-dirty">未保存</span>
-                              )}
-                            </span>
-                            {item.description && (
-                              <span className="field-desc">{item.description}</span>
-                            )}
-                            {hint && <span className="field-hint">⚠ {hint}</span>}
-                          </div>
-                          <div className="master-input">{renderControl(item)}</div>
-                        </div>
-                      )
-                    })}
-
-                    {group.sections.map((section) => {
-                      const activeCount = section.items.filter((i) => isActive(i, draft)).length
-                      const sectionInactive = activeCount === 0
-                      const secChanged = section.items.filter(
-                        (i) => changed[i.key] !== undefined,
-                      ).length
-
-                      return (
-                        <div
-                          className={`settings-section ${sectionInactive ? 'section-inactive' : ''}`}
-                          key={section.name}
-                        >
-                          <div className="section-head">
-                            <span className="section-name">{section.name}</span>
-                            {sectionInactive && (
-                              <span className="badge-inactive">当前未启用</span>
-                            )}
-                            {secChanged > 0 && <span className="badge-dirty">{secChanged}</span>}
-                          </div>
-                          <div className="section-body">
-                            {section.items.map(renderField)}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </section>
-            )
-          })}
-
-          {/* 只读信息：与可调项用同一套视觉语言，但默认折叠、样式更弱 */}
-          <section className="settings-group group-readonly">
-            <button className="group-head" onClick={() => toggleGroup(READONLY_GROUP)}>
-              <span className="group-index readonly">i</span>
-              <span className="group-title">
-                <span className="group-name">{READONLY_GROUP}</span>
-                <span className="group-summary">{READONLY_HINT}</span>
-              </span>
-              <span className="group-count">{Object.keys(settings.readonly).length} 项</span>
-              <span className="chev">{collapsed[READONLY_GROUP] ? '▸' : '▾'}</span>
+            <button
+              className={`settings-nav-item ${activeTab === READONLY_GROUP ? 'active' : ''}`}
+              onClick={() => setActiveTab(READONLY_GROUP)}
+            >
+              <span>{READONLY_GROUP}</span>
             </button>
-            {!collapsed[READONLY_GROUP] && (
-              <div className="group-body">
+          </div>
+
+          <div className="settings-nav-foot">
+            <button className="btn ghost tiny" onClick={() => void resetAll()} disabled={saving}>
+              还原全部默认
+            </button>
+          </div>
+        </nav>
+
+        {/* 右侧设置内容区 */}
+        <div className="settings-main">
+          <div className="settings-main-head">
+            <div>
+              <h2 className="settings-group-heading">
+                {activeGroup ? activeGroup.name : READONLY_GROUP}
+              </h2>
+              <p className="settings-group-sub">
+                {activeGroup ? activeGroup.summary : READONLY_HINT}
+              </p>
+            </div>
+            <button className="icon-btn" onClick={onClose} title="关闭 (Esc)">
+              ×
+            </button>
+          </div>
+
+          <div className="settings-main-body">
+            {activeGroup ? (
+              <>
+                {activeGroup.master.map((item) => {
+                  const hint = dependencyHint(item, byKey)
+                  return (
+                    <div className="settings-surface-block master-block" key={item.key}>
+                      <div className="field">
+                        <div className="field-label">
+                          <span className="field-name">
+                            {item.label}
+                            {changed[item.key] !== undefined && (
+                              <span className="tag-dirty">待保存</span>
+                            )}
+                          </span>
+                          {item.description && (
+                            <span className="field-desc">{item.description}</span>
+                          )}
+                          {hint && <span className="field-hint">{hint}</span>}
+                        </div>
+                        <div className="field-input">{renderControl(item)}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {activeGroup.sections.map((section) => {
+                  const activeCount = section.items.filter((i) => isActive(i, draft)).length
+                  const sectionInactive = activeCount === 0
+
+                  return (
+                    <div
+                      className={`settings-section-group ${sectionInactive ? 'section-inactive' : ''}`}
+                      key={section.name}
+                    >
+                      <div className="section-head">
+                        <span className="section-name">{section.name}</span>
+                        {sectionInactive && <span className="badge-inactive">当前未启用</span>}
+                      </div>
+                      <div className="settings-surface-block">
+                        {section.items.map(renderField)}
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            ) : (
+              <div className="settings-surface-block">
                 <div className="readonly-grid">
                   {Object.entries(settings.readonly).map(([k, v]) => (
                     <div className="readonly-row" key={k}>
@@ -323,27 +295,24 @@ export default function SettingsPanel({ settings, onClose, onSaved, notify }: Pr
                 </div>
               </div>
             )}
-          </section>
-        </div>
+          </div>
 
-        <div className="modal-foot spread">
-          <button className="btn ghost" onClick={() => void resetAll()} disabled={saving}>
-            还原默认值
-          </button>
-          <div className="foot-actions">
+          <div className="settings-main-foot">
             <span className="muted">
-              {changedCount > 0 ? `${changedCount} 项待保存` : '没有未保存的改动'}
+              {changedCount > 0 ? `已修改 ${changedCount} 项配置` : '修改后保存即刻生效，无需重启'}
             </span>
-            <button className="btn" onClick={onClose} disabled={saving}>
-              取消
-            </button>
-            <button
-              className="btn primary"
-              onClick={() => void save()}
-              disabled={saving || changedCount === 0}
-            >
-              {saving ? '保存中…' : '保存'}
-            </button>
+            <div className="foot-actions">
+              <button className="btn ghost" onClick={onClose} disabled={saving}>
+                取消
+              </button>
+              <button
+                className="btn primary"
+                onClick={() => void save()}
+                disabled={saving || changedCount === 0}
+              >
+                {saving ? '保存中…' : '保存更改'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
